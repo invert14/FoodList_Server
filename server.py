@@ -48,9 +48,19 @@ def user():
     return str(user.id)
 
 
+def updateProductAmount(deviceId, newAmount, product):
+    oldProductAmount = get(pa for pa in ProductAmount if pa.product == product and pa.device == deviceId)
+    print oldProductAmount
+    if oldProductAmount is not None:
+        oldProductAmount.amount = newAmount
+    else:
+        newProductAmount = ProductAmount(product=product, device=deviceId, amount=newAmount)
+
+
 @app.route('/products', methods=['GET', 'POST'])
 def sync():
     products = []
+    productsToBeDeleted = []
     userId = 1
     if request.method == 'GET':
         userId = request.args.get('user_id', '')
@@ -59,12 +69,15 @@ def sync():
         deviceId = int(request.form['device_id'])
         productsJson = request.form['products']
         products = JSONDecoder().decode(productsJson)
-        # print products
+        productsToBeDeleted = JSONDecoder().decode(request.form['productsToBeDeleted'])
+        print productsToBeDeleted
+
         print userId
         print deviceId
 
     with db_session:
         user = get(u for u in User if u.id == userId)
+
         for p in products:
             productList = json.loads(p)
             productParams = dict(productList)
@@ -72,25 +85,29 @@ def sync():
                 print key, value
             productId = productParams["id"]
             newAmount = productParams["localAmount"]
-            if productId == 0:
-                print 'NEW PRODUCT'
-                product = Product(name=productParams["name"],amount=newAmount,user=user)
-            else:
+
+            product = get(p for p in Product if p.id == productId)
+            if product is not None:
                 print 'found product'
-                product = get(p for p in Product if p.id == productId)
-            print product
-            oldProductAmount = get(pa for pa in ProductAmount if pa.product == product and pa.device == deviceId)
-            print oldProductAmount
-            if oldProductAmount is not None:
-                oldProductAmount.amount = newAmount
             else:
-                newProductAmount = ProductAmount(product=product, device=deviceId, amount=newAmount)
+                print 'NEW PRODUCT'
+                product = Product(name=productParams["name"], amount=newAmount, user=user)
+                commit()
+            print product.productAmounts
+            updateProductAmount(deviceId, newAmount, product)
+
+        for p in productsToBeDeleted:
+            productName = p[1:-1]
+            product = get(p for p in Product if p.name == productName)
+            for pa in product.productAmounts:
+                pa.delete()
+            product.delete()
 
     with db_session:
         user_products = select(p for p in Product if p.user.id == userId)[:]
         print user_products
         for p in user_products:
-            amounts = select([pa.amount] for pa in ProductAmount if pa.product == p)[:]
+            amounts = select([pa.amount] for pa in ProductAmount if pa.product == p).without_distinct()
             p.amount = sum(amounts)
 
     response = []
