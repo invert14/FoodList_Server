@@ -1,7 +1,7 @@
 import json
+from json.decoder import JSONDecoder
 from flask import Flask, request
 from pony.orm import *
-from pprint import pprint
 
 app = Flask(__name__)
 db = Database("sqlite", "stockmanager.sqlite", create_db=True)
@@ -12,6 +12,14 @@ class Product(db.Entity):
     name = Required(str)
     amount = Required(int)
     user = Required("User")
+    productAmounts = Set("ProductAmount")
+
+
+class ProductAmount(db.Entity):
+    id = PrimaryKey(int, auto=True)
+    product = Required("Product")
+    device = Required(int)
+    amount = Required(int)
 
 
 class User(db.Entity):
@@ -41,17 +49,55 @@ def user():
 
 
 @app.route('/products', methods=['GET', 'POST'])
-def products():
-    user_id = 1
+def sync():
+    products = []
+    userId = 1
     if request.method == 'GET':
-        user_id = request.args.get('user_id', '')
+        userId = request.args.get('user_id', '')
     else:
-        user_id = request.form['user_id']
+        userId = int(request.form['user_id'])
+        deviceId = int(request.form['device_id'])
+        productsJson = request.form['products']
+        products = JSONDecoder().decode(productsJson)
+        # print products
+        print userId
+        print deviceId
+
     with db_session:
-        user_products = select([p.id, p.name, p.amount] for p in Product if p.user.id == user_id)[:]
+        user = get(u for u in User if u.id == userId)
+        for p in products:
+            productList = json.loads(p)
+            productParams = dict(productList)
+            for key, value in productParams.items():
+                print key, value
+            productId = productParams["id"]
+            newAmount = productParams["localAmount"]
+            if productId == 0:
+                print 'NEW PRODUCT'
+                product = Product(name=productParams["name"],amount=newAmount,user=user)
+            else:
+                print 'found product'
+                product = get(p for p in Product if p.id == productId)
+            print product
+            oldProductAmount = get(pa for pa in ProductAmount if pa.product == product and pa.device == deviceId)
+            print oldProductAmount
+            if oldProductAmount is not None:
+                oldProductAmount.amount = newAmount
+            else:
+                newProductAmount = ProductAmount(product=product, device=deviceId, amount=newAmount)
+
+    with db_session:
+        user_products = select(p for p in Product if p.user.id == userId)[:]
+        print user_products
+        for p in user_products:
+            amounts = select([pa.amount] for pa in ProductAmount if pa.product == p)[:]
+            p.amount = sum(amounts)
+
     response = []
-    for p in user_products:
-        response.append(dict(id=p[0], name=p[1], amount=p[2]))
+    with db_session:
+        user_products = select(p for p in Product if p.user.id == userId)[:]
+        for p in user_products:
+            response.append(dict(id=p.id, name=p.name, amount=p.amount))
     return json.dumps(response)
 
 
@@ -95,7 +141,7 @@ def delete():
 
 
 if __name__ == '__main__':
-    db.generate_mapping(create_tables=True)
+    db.generate_mapping(check_tables=True, create_tables=True)
     app.debug = True
     sql_debug(True)
     app.run(host='0.0.0.0')
