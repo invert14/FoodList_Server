@@ -117,46 +117,6 @@ def sync():
             response.append(dict(id=p.id, name=p.name, amount=p.amount))
     return json.dumps(response)
 
-
-@app.route('/take', methods=['GET', 'POST'])
-def take():
-    product_id = request.args.get('product_id', '')
-    amount = request.args.get('amount', '')
-    with db_session:
-        product = Product.get(id=product_id)
-        product.amount -= int(amount)
-    return product.id
-
-
-@app.route('/add', methods=['GET', 'POST'])
-def add():
-    product_id = request.args.get('product_id', '')
-    amount = request.args.get('amount', '')
-    with db_session:
-        product = Product.get(id=product_id)
-        product.amount += int(amount)
-    return str(product.id)
-
-
-@app.route('/new', methods=['GET', 'POST'])
-def new():
-    product_name = request.args.get('product_name', '')
-    user_id = request.args.get('user_id', '')
-    with db_session:
-        user = get(u for u in User if u.id == user_id)
-        product = Product(name=product_name, amount=0, user=user)
-        commit()
-    return "OK"
-
-
-@app.route('/delete', methods=['GET', 'POST'])
-def delete():
-    product_id = request.args.get('product_id', '')
-    with db_session:
-        Product[product_id].delete()
-    return "OK"
-
-
 if __name__ == '__main__':
     db.generate_mapping(check_tables=True, create_tables=True)
     app.debug = True
