@@ -8,8 +8,8 @@ db = Database("sqlite", "stockmanager.sqlite", create_db=True)
 
 
 class Product(db.Entity):
-    id = PrimaryKey(int, auto=True)
-    name = Required(str)
+    # id = PrimaryKey(int, auto=True)
+    name = PrimaryKey(str)
     amount = Required(int)
     user = Required("User")
     productAmounts = Set("ProductAmount")
@@ -56,6 +56,17 @@ def updateProductAmount(deviceId, newAmount, product):
     else:
         newProductAmount = ProductAmount(product=product, device=deviceId, amount=newAmount)
 
+@app.route('/product', methods=['GET'])
+def get_product():
+    if request.method == 'GET':
+        print 'GET!!!!!!'
+        name = request.args.get('name', '')
+        with db_session:
+            product = get(p for p in Product if p.name == name)
+            if product is None:
+                product = Product(name = name, amount = 0, user = 1)
+    response = [dict(name=product.name, amount=product.amount)]
+    return json.dumps(response)
 
 @app.route('/products', methods=['GET', 'POST'])
 def sync():
@@ -83,15 +94,15 @@ def sync():
             productParams = dict(productList)
             for key, value in productParams.items():
                 print key, value
-            productId = productParams["id"]
+            productName = productParams["name"]
             newAmount = productParams["localAmount"]
 
-            product = get(p for p in Product if p.id == productId)
+            product = get(p for p in Product if p.name == productName)
             if product is not None:
                 print 'found product'
             else:
                 print 'NEW PRODUCT'
-                product = Product(name=productParams["name"], amount=newAmount, user=user)
+                product = Product(name=productName, amount=newAmount, user=user)
                 commit()
             print product.productAmounts
             updateProductAmount(deviceId, newAmount, product)
@@ -114,7 +125,7 @@ def sync():
     with db_session:
         user_products = select(p for p in Product if p.user.id == userId)[:]
         for p in user_products:
-            response.append(dict(id=p.id, name=p.name, amount=p.amount))
+            response.append(dict(name=p.name, amount=p.amount))
     return json.dumps(response)
 
 if __name__ == '__main__':
