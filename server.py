@@ -5,14 +5,23 @@ from pony.orm import *
 
 app = Flask(__name__)
 db = Database("sqlite", "stockmanager.sqlite", create_db=True)
+DEFAULT_LIST_NAME = "Default list"
+DEFAULT_SHOP_NAME = "Default shop"
 
 
 class Product(db.Entity):
-    # id = PrimaryKey(int, auto=True)
     name = PrimaryKey(str)
     amount = Required(int)
-    user = Required("User")
+    price = Required(float)
+    shop = Required(str)
+    list = Required("List")
     productAmounts = Set("ProductAmount")
+
+
+class List(db.Entity):
+    name = PrimaryKey(str)
+    user = Required("User")
+    products = Set(Product)
 
 
 class ProductAmount(db.Entity):
@@ -26,7 +35,7 @@ class User(db.Entity):
     id = PrimaryKey(int, auto=True)
     login = Required(str, unique=True)
     password = Required(str)
-    products = Set(Product)
+    lists = Set(List)
 
 
 @app.route('/user', methods=['GET', 'POST'])
@@ -56,6 +65,7 @@ def updateProductAmount(deviceId, newAmount, product):
     else:
         newProductAmount = ProductAmount(product=product, device=deviceId, amount=newAmount)
 
+
 @app.route('/product', methods=['GET'])
 def get_product():
     if request.method == 'GET':
@@ -64,27 +74,80 @@ def get_product():
         with db_session:
             product = get(p for p in Product if p.name == name)
             if product is None:
-                product = Product(name = name, amount = 0, user = 1)
+                product = Product(name=name, amount=0, user=1)
     response = [dict(name=product.name, amount=product.amount)]
     return json.dumps(response)
+
+@app.route('/lists', methods=['GET', 'POST'])
+def get_lists():
+    lists = []
+    userId = 1
+    if request.method == 'GET':
+        userId = request.args.get('user_id', '')
+    else:
+        userId = int(request.form['user_id'])
+
+    with db_session:
+        lists = select(l.name for l in List if l.user.id == userId)[:]
+    response = []
+    for l in lists:
+        response.append(dict(name=l));
+
+    return json.dumps(response)
+
+def get_all_user_products(userId):
+    return select(p for p in Product if p.list.user.id == userId)[:]
+
+
+def get_list_products(listName):
+    products = select(p for p in Product if p.list.name == listName)[:]
+    print products
+    return products
+
+
+def updateProductShop(product, productParams):
+    if productParams.has_key("shopModified"):
+        if productParams["shopModified"]:
+            if productParams.has_key("shop"):
+                productShop = productParams["shop"]
+                product.shop = productShop
+
+
+def updateProductPrice(product, productParams):
+    if productParams.has_key("priceModified"):
+        if productParams["priceModified"]:
+            if productParams.has_key("price"):
+                productPrice = productParams["price"]
+                product.price = productPrice
+
 
 @app.route('/products', methods=['GET', 'POST'])
 def sync():
     products = []
     productsToBeDeleted = []
     userId = 1
+    deviceId = 0
+    requestContainsListName = 0
+    listName = DEFAULT_LIST_NAME
     if request.method == 'GET':
         userId = request.args.get('user_id', '')
+        if ('list_name' in request.args):
+            requestContainsListName = 1
+            listName = request.args.get('list_name', '')
     else:
         userId = int(request.form['user_id'])
         deviceId = int(request.form['device_id'])
+        if ('list_name' in request.form):
+            requestContainsListName = 1
+            listName = request.form['list_name']
         productsJson = request.form['products']
         products = JSONDecoder().decode(productsJson)
         productsToBeDeleted = JSONDecoder().decode(request.form['productsToBeDeleted'])
         print productsToBeDeleted
 
-        print userId
-        print deviceId
+    print userId
+    print deviceId
+    print listName
 
     with db_session:
         user = get(u for u in User if u.id == userId)
@@ -97,15 +160,28 @@ def sync():
             productName = productParams["name"]
             newAmount = productParams["localAmount"]
 
+            productListName = DEFAULT_LIST_NAME
+            if productParams.has_key("list"):
+                productListName = productParams["list"]
+
+            productShop = DEFAULT_SHOP_NAME
+            productPrice = 0.0
+
             product = get(p for p in Product if p.name == productName)
             if product is not None:
                 print 'found product'
             else:
                 print 'NEW PRODUCT'
-                product = Product(name=productName, amount=newAmount, user=user)
-                commit()
+                list = get(l for l in List if l.name == productListName)
+                if list is None:
+                    list = List(name=productListName, user=user)
+                print 'eloooo  ' + str(productPrice)
+                product = Product(name=productName, amount=newAmount, list=list, price=productPrice, shop=productShop)
+                # commit()
             print product.productAmounts
             updateProductAmount(deviceId, newAmount, product)
+            updateProductShop(product, productParams)
+            updateProductPrice(product, productParams)
 
         for p in productsToBeDeleted:
             productName = p[1:-1]
@@ -115,7 +191,8 @@ def sync():
             product.delete()
 
     with db_session:
-        user_products = select(p for p in Product if p.user.id == userId)[:]
+        user_products = get_all_user_products(userId)
+        # user_products = select(p for p in Product if p.user.id == userId)[:]
         print user_products
         for p in user_products:
             amounts = select([pa.amount] for pa in ProductAmount if pa.product == p).without_distinct()
@@ -123,10 +200,15 @@ def sync():
 
     response = []
     with db_session:
-        user_products = select(p for p in Product if p.user.id == userId)[:]
+        if requestContainsListName > 0:
+            user_products = get_list_products(listName)
+        else:
+            user_products = get_all_user_products(userId)
+        # user_products = select(p for p in Product if p.user.id == userId)[:]
         for p in user_products:
-            response.append(dict(name=p.name, amount=p.amount))
+            response.append(dict(name=p.name, amount=p.amount, list=p.list.name, price=p.price, shop=p.shop))
     return json.dumps(response)
+
 
 if __name__ == '__main__':
     db.generate_mapping(check_tables=True, create_tables=True)
