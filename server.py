@@ -19,7 +19,8 @@ class Product(db.Entity):
 
 
 class List(db.Entity):
-    name = PrimaryKey(str)
+    id = PrimaryKey(int, auto=True)
+    name = Required(str)
     user = Required("User")
     products = Set(Product)
 
@@ -99,8 +100,8 @@ def get_all_user_products(userId):
     return select(p for p in Product if p.list.user.id == userId)[:]
 
 
-def get_list_products(listName):
-    products = select(p for p in Product if p.list.name == listName)[:]
+def get_list_products(userId, listName):
+    products = select(p for p in Product if p.list.user.id == userId and p.list.name == listName)[:]
     print products
     return products
 
@@ -172,7 +173,7 @@ def sync():
                 print 'found product'
             else:
                 print 'NEW PRODUCT'
-                list = get(l for l in List if l.name == productListName)
+                list = get(l for l in List if l.name == productListName and l.user.id == userId)
                 if list is None:
                     list = List(name=productListName, user=user)
                 print 'eloooo  ' + str(productPrice)
@@ -201,7 +202,7 @@ def sync():
     response = []
     with db_session:
         if requestContainsListName > 0:
-            user_products = get_list_products(listName)
+            user_products = get_list_products(userId, listName)
         else:
             user_products = get_all_user_products(userId)
         # user_products = select(p for p in Product if p.user.id == userId)[:]
